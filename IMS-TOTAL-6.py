@@ -8,6 +8,17 @@ import google.generativeai as genai
 import sqlite3
 import json
 import os
+import time
+
+def safe_generate_content(model, prompt):
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            return model.generate_content(prompt)
+        except Exception as e:
+            if attempt == max_retries - 1:
+                raise e
+            time.sleep(2)  # 오류 발생 시 2초 대기 후 재시도
 from datetime import datetime
 # --- 대화형 인터페이스를 위한 세션 상태 초기화 ---
 if "messages" not in st.session_state:
@@ -566,8 +577,15 @@ if is_active:
                 
                 genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
                 model = genai.GenerativeModel('gemini-1.5-flash')
-                response = model.generate_content(f"{system_prompt}\n\n데이터: {risk_summary}")
-                
+                # [수정 전]
+                # response = model.generate_content(f"{system_prompt}\n\n데이터: {risk_summary}")
+
+                # [수정 후]
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                # 전체 리스크 데이터 대신 위험도가 높은 상위 3개 항목만 요약해서 전달
+                summary_risks = {k: v for k, v in st.session_state['last_defect_risks'].items() if v > 0.3} 
+                response = safe_generate_content(model, f"{system_prompt}\n\n핵심 리스크 요약: {summary_risks}")
+                              
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
                 # --- [여기까지 추가] ---
                 
@@ -668,8 +686,15 @@ if is_active:
                 
             with st.chat_message("assistant"):
                 model = genai.GenerativeModel('gemini-1.5-flash')
-                full_prompt = f"당신은 사출 전문가입니다. 상태: {system_status}. 이전 대화: {st.session_state.messages}. 질문: {prompt}"
-                response = model.generate_content(full_prompt)
+                # [대체 시작]
+                # 최근 5개의 대화 기록만 요약하여 프롬프트 길이를 최적화합니다.
+                recent_history = st.session_state.messages[-5:] 
+                full_prompt = f"당신은 사출 전문가입니다. 최근 대화 내역: {recent_history}. 현재 질문: {prompt}"
+
+                # 안전한 함수 호출 사용
+                response = safe_generate_content(model, full_prompt)
+                # [대체 끝]
+                
                 st.markdown(response.text)
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
     with t2:
