@@ -683,30 +683,39 @@ if is_active:
                 st.markdown(message["content"])
 
         # --- [수정] 하단 채팅창 로직 ---
-if prompt := st.chat_input("추가 질문을 입력하세요..."):
-    # 1. 상태 저장
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    
-    # 2. UI 즉시 업데이트 (사용자 질문 보여주기)
-    with st.chat_message("user"):
-        st.markdown(prompt)
+# --- 채팅 상담창 출력 및 입력창 (최적화 버전) ---
+        st.markdown("---")
+        st.subheader("💬 AI 엔지니어 상담창")
         
-    # 3. AI 답변 생성 (Spinner 추가로 대기 중임을 명시)
-    with st.spinner("AI 엔지니어가 답변을 작성 중입니다..."):
-        try:
-            system_status = f"리스크: {st.session_state.get('last_defect_risks', '없음')}"
-            
-            # 여기서 위에서 만든 함수를 호출
-            ai_answer = get_ai_response(prompt, system_status)
-            
-            # 4. 결과 저장 및 화면 표시
-            st.session_state.messages.append({"role": "assistant", "content": ai_answer})
-            with st.chat_message("assistant"):
-                st.markdown(ai_answer)
+        # 메시지 히스토리 출력
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        # 채팅 입력
+        if prompt := st.chat_input("추가 질문을 입력하세요..."):
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
                 
-        except Exception as e:
-            st.error(f"답변 생성 중 오류 발생: {e}")
-            # 캐시가 꼬였을 경우를 대비해 초기화 버튼 제공
-            if st.button("오류 해결을 위해 캐시 초기화"):
-                st.cache_data.clear()
-                st.rerun()
+            with st.chat_message("assistant"):
+                # 응답 생성 및 표시
+                try:
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    
+                    # 현재 상태와 최근 대화 3개만 요약해서 전송 (속도 핵심)
+                    recent_history = st.session_state.messages[-4:-1] 
+                    system_status = f"리스크 정보: {st.session_state.get('last_defect_risks', '정보 없음')}"
+                    
+                    full_prompt = f"당신은 사출 성형 전문가입니다. 현재 상태: {system_status}. 이전 문맥: {recent_history}. 질문: {prompt}"
+                    
+                    # 스트리밍 호출 (답변이 오는 즉시 출력)
+                    stream = model.generate_content(full_prompt, stream=True)
+                    
+                    # 결과를 한 글자씩 실시간 출력
+                    response_text = st.write_stream(chunk.text for chunk in stream)
+                    
+                    st.session_state.messages.append({"role": "assistant", "content": response_text})
+                
+                except Exception as e:
+                    st.error(f"응답 생성 중 오류 발생: {e}")
