@@ -269,6 +269,7 @@ def run_genai_advice(input_values):
         
         res = model.generate_content(f"{L['ai_prompt']}{risks}.")
         st.session_state['expert_advice_text'] = res.text
+        st.session_state['api_call_count'] = st.session_state.get('api_call_count', 0) + 1
     except Exception as e:
         st.session_state['expert_advice_text'] = f"{L['ai_err']}{e}"
 
@@ -347,6 +348,8 @@ def generate_joint_style_ai_guidance(input_values, mode="Diagnosis"):
         target_model = get_cached_target_model()
         model = genai.GenerativeModel(target_model, system_instruction=system_instruction)
         response = model.generate_content(prompt)
+        # [추가] API 사용량 카운터 (세션 기준, 대략적인 모니터링용)
+        st.session_state['api_call_count'] = st.session_state.get('api_call_count', 0) + 1
         return response.text
 
     except Exception as e:
@@ -485,6 +488,12 @@ with st.sidebar:
 
     # --- 중첩 현상을 근본적으로 해결하기 위한 중복 제거 없는 DB 연속 누적(Append) 저장 엔진 ---
     st.sidebar.markdown("---")
+    # [추가] API 사용량 모니터링: 세션 내 Gemini 호출 횟수 표시 (무료 등급 일일 한도 20회 참고용)
+    _api_calls = st.session_state.get('api_call_count', 0)
+    st.sidebar.markdown(
+        f"<span style='color:#94a3b8; font-size:0.85rem;'>🔌 이번 세션 AI 호출: {_api_calls}회 (무료 등급 일일 한도 참고용)</span>",
+        unsafe_allow_html=True
+    )
     st.sidebar.markdown(f"<h3 style='color:#00e5ff; font-size:1.1rem;'>{L['db_export_title']}</h3>", unsafe_allow_html=True)
     
     if not st.session_state['df_injection'].empty:
@@ -620,19 +629,28 @@ if is_active:
             if st.session_state['last_analyzed_inputs'] is not None:
                 guide_mode = "Optimization" if st.session_state.get('last_opt_df') is not None else "Diagnosis"
 
-                # [추가] JOINT-AI-APP-5 스타일: LLM 기반 가이드라인 생성 진행률 표시
-                ai_progress_bar = st.progress(0, text=" AI 공정 가이드라인 생성 준비 중...")
-                ai_progress_bar.progress(20, text=" 공정 변수 및 10대 불량 리스크 데이터 정리 중...")
-                ai_progress_bar.progress(45, text=" 사용 가능한 AI 모델 탐색 중...")
-                ai_progress_bar.progress(65, text=L['joint_ai_loading'])
+                # [추가] API 절약: 직전과 동일한 조건/모드라면 재호출하지 않고 캐시된 리포트 재사용
+                inputs_signature = (tuple(round(float(v), 3) for v in st.session_state['last_analyzed_inputs']), guide_mode)
+                if (
+                    st.session_state.get('joint_ai_guidance_text')
+                    and st.session_state.get('joint_ai_guidance_signature') == inputs_signature
+                ):
+                    st.toast("ℹ️ 동일한 조건의 가이드라인이 이미 생성되어 있어 API를 재호출하지 않았습니다.")
+                else:
+                    # [추가] JOINT-AI-APP-5 스타일: LLM 기반 가이드라인 생성 진행률 표시
+                    ai_progress_bar = st.progress(0, text=" AI 공정 가이드라인 생성 준비 중...")
+                    ai_progress_bar.progress(20, text=" 공정 변수 및 10대 불량 리스크 데이터 정리 중...")
+                    ai_progress_bar.progress(45, text=" 사용 가능한 AI 모델 탐색 중...")
+                    ai_progress_bar.progress(65, text=L['joint_ai_loading'])
 
-                st.session_state['joint_ai_guidance_text'] = generate_joint_style_ai_guidance(
-                    st.session_state['last_analyzed_inputs'], mode=guide_mode
-                )
-                st.session_state['joint_ai_guidance_mode'] = guide_mode
+                    st.session_state['joint_ai_guidance_text'] = generate_joint_style_ai_guidance(
+                        st.session_state['last_analyzed_inputs'], mode=guide_mode
+                    )
+                    st.session_state['joint_ai_guidance_mode'] = guide_mode
+                    st.session_state['joint_ai_guidance_signature'] = inputs_signature
 
-                ai_progress_bar.progress(90, text=" 현장 적용용 리포트 정리 중...")
-                ai_progress_bar.progress(100, text="✅ AI 공정 가이드라인 생성 완료")
+                    ai_progress_bar.progress(90, text=" 현장 적용용 리포트 정리 중...")
+                    ai_progress_bar.progress(100, text="✅ AI 공정 가이드라인 생성 완료")
             else:
                 st.warning(L['warn_diag_first'])
 
@@ -845,10 +863,13 @@ if is_active:
                     genai.configure(api_key=os.environ.get("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY", None))
                     target_model = get_cached_target_model()
                     model = genai.GenerativeModel(target_model)
-                    full_prompt = f"당신은 사출 전문가입니다. 상태: {system_status}. 이전 대화: {st.session_state.messages}. 질문: {prompt}"
+                    # [추가] API 절약: 전체 대화 기록 대신 최근 6턴만 컨텍스트로 전송 (토큰/비용 절감)
+                    recent_messages = st.session_state.messages[-6:]
+                    full_prompt = f"당신은 사출 전문가입니다. 상태: {system_status}. 이전 대화(최근): {recent_messages}. 질문: {prompt}"
                     response = model.generate_content(full_prompt)
                     st.markdown(response.text)
                     st.session_state.messages.append({"role": "assistant", "content": response.text})
+                    st.session_state['api_call_count'] = st.session_state.get('api_call_count', 0) + 1
                 except Exception as e:
                     err_msg = str(e)
                     if "429" in err_msg:
