@@ -604,12 +604,21 @@ if is_active:
         # [추가] JOINT-AI-APP-5 스타일 상세 AI 가이드 생성 (기존 기능과 독립적으로 추가됨)
         if st.button(L['btn_joint_ai_guide'], key="btn_joint_ai_guide_detailed"):
             if st.session_state['last_analyzed_inputs'] is not None:
-                with st.spinner(L['joint_ai_loading']):
-                    guide_mode = "Optimization" if st.session_state.get('last_opt_df') is not None else "Diagnosis"
-                    st.session_state['joint_ai_guidance_text'] = generate_joint_style_ai_guidance(
-                        st.session_state['last_analyzed_inputs'], mode=guide_mode
-                    )
-                    st.session_state['joint_ai_guidance_mode'] = guide_mode
+                guide_mode = "Optimization" if st.session_state.get('last_opt_df') is not None else "Diagnosis"
+
+                # [추가] JOINT-AI-APP-5 스타일: LLM 기반 가이드라인 생성 진행률 표시
+                ai_progress_bar = st.progress(0, text="🧠 AI 공정 가이드라인 생성 준비 중...")
+                ai_progress_bar.progress(20, text="📊 공정 변수 및 10대 불량 리스크 데이터 정리 중...")
+                ai_progress_bar.progress(45, text="🔎 사용 가능한 AI 모델 탐색 중...")
+                ai_progress_bar.progress(65, text=L['joint_ai_loading'])
+
+                st.session_state['joint_ai_guidance_text'] = generate_joint_style_ai_guidance(
+                    st.session_state['last_analyzed_inputs'], mode=guide_mode
+                )
+                st.session_state['joint_ai_guidance_mode'] = guide_mode
+
+                ai_progress_bar.progress(90, text="📝 현장 적용용 리포트 정리 중...")
+                ai_progress_bar.progress(100, text="✅ AI 공정 가이드라인 생성 완료")
             else:
                 st.warning(L['warn_diag_first'])
 
