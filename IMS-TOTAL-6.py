@@ -66,9 +66,9 @@ LANG_DICT = {
         "db_export_title": "💾 External Database Export",
         "db_prepare_btn": "⚙️ Generate & Save DB Snapshot",
         "db_prepared_msg": "Prepared File: ",
-        "db_current_latest": "✨ The file contains the latest data state.",
+        "db_current_latest": " The file contains the latest data state.",
         # [추가] JOINT 스타일 AI 가이드 기능용 라벨
-        "btn_joint_ai_guide": "🤖 Generate LLM-based Process Guidelines (Detailed)",
+        "btn_joint_ai_guide": " Generate LLM-based Process Guidelines (Detailed)",
         "joint_ai_loading": "Analyzing process variables and defect risk data to generate factory guidance...",
         "exp_joint_ai_advice": "View Detailed AI Process Guidance Report",
         "joint_ai_download": "📥 Download Report"
@@ -124,9 +124,9 @@ LANG_DICT = {
         "db_export_title": "💾 데이터베이스 외부 내보내기",
         "db_prepare_btn": "⚙️ DB 스냅샷 생성 및 서버 저장",
         "db_prepared_msg": "준비된 파일: ",
-        "db_current_latest": "✨ 최신 데이터 상태가 파일에 이미 반영되어 있습니다.",
+        "db_current_latest": " 최신 데이터 상태가 파일에 이미 반영되어 있습니다.",
         # [추가] JOINT 스타일 AI 가이드 기능용 라벨
-        "btn_joint_ai_guide": "🤖 LLM 기반 공정 가이드라인 생성 (상세)",
+        "btn_joint_ai_guide": " LLM 기반 공정 가이드라인 생성 (상세)",
         "joint_ai_loading": "공정 변수와 불량 리스크 데이터를 분석하여 공장 가이드를 생성 중입니다...",
         "exp_joint_ai_advice": "상세 AI 공정 가이드 리포트 보기",
         "joint_ai_download": "📥 리포트 다운로드"
@@ -621,9 +621,9 @@ if is_active:
                 guide_mode = "Optimization" if st.session_state.get('last_opt_df') is not None else "Diagnosis"
 
                 # [추가] JOINT-AI-APP-5 스타일: LLM 기반 가이드라인 생성 진행률 표시
-                ai_progress_bar = st.progress(0, text="🧠 AI 공정 가이드라인 생성 준비 중...")
-                ai_progress_bar.progress(20, text="📊 공정 변수 및 10대 불량 리스크 데이터 정리 중...")
-                ai_progress_bar.progress(45, text="🔎 사용 가능한 AI 모델 탐색 중...")
+                ai_progress_bar = st.progress(0, text=" AI 공정 가이드라인 생성 준비 중...")
+                ai_progress_bar.progress(20, text=" 공정 변수 및 10대 불량 리스크 데이터 정리 중...")
+                ai_progress_bar.progress(45, text=" 사용 가능한 AI 모델 탐색 중...")
                 ai_progress_bar.progress(65, text=L['joint_ai_loading'])
 
                 st.session_state['joint_ai_guidance_text'] = generate_joint_style_ai_guidance(
@@ -631,7 +631,7 @@ if is_active:
                 )
                 st.session_state['joint_ai_guidance_mode'] = guide_mode
 
-                ai_progress_bar.progress(90, text="📝 현장 적용용 리포트 정리 중...")
+                ai_progress_bar.progress(90, text=" 현장 적용용 리포트 정리 중...")
                 ai_progress_bar.progress(100, text="✅ AI 공정 가이드라인 생성 완료")
             else:
                 st.warning(L['warn_diag_first'])
@@ -754,7 +754,7 @@ if is_active:
                 for a_idx, algo in enumerate(algorithms):
                     opt_progress_bar.progress(
                         a_idx / total_algos_n,
-                        text=f"🔍 알고리즘 탐색 중 ({a_idx+1}/{total_algos_n}): {algo}"
+                        text=f" 알고리즘 탐색 중 ({a_idx+1}/{total_algos_n}): {algo}"
                     )
                     try:
                         res_temp = minimize(calculate_total_risk, x0, method=algo, bounds=bnds, options={'maxiter': 500})
@@ -764,7 +764,7 @@ if is_active:
                             chosen_algo = algo
                     except: continue
                 
-                opt_progress_bar.progress(0.9, text="🔍 다중 시작점(Multi-Start) 보조 탐색 중...")
+                opt_progress_bar.progress(0.9, text=" 다중 시작점(Multi-Start) 보조 탐색 중...")
                 try:
                     random_x0 = [np.random.uniform(b[0], b[1]) for b in bnds]
                     res_global = minimize(calculate_total_risk, random_x0, method='L-BFGS-B', bounds=bnds)
