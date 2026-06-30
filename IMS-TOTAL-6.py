@@ -676,58 +676,47 @@ if is_active:
                 csv = st.session_state['last_opt_df'].to_csv(index=False).encode('utf-8-sig')
                 st.download_button(label=L['btn_download'], data=csv, file_name='total_optimized_params.csv', mime='text/csv')
             # --- [추가] 채팅 상담창 출력 및 입력창 ---
-        st.markdown("---")
-        st.subheader("💬 AI 엔지니어 상담창")
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
+       # --- [채팅 상담창: 최적화된 스트리밍 버전] ---
+with st.container():
+    st.markdown("---")
+    st.subheader("💬 AI 엔지니어 상담창")
+    
+    # 메시지 기록 출력 (중복 방지: 여기서 딱 한 번만 수행)
+    for message in st.session_state.messages:
+        with st.chat_message(message["role"]):
+            st.markdown(message["content"])
 
-        # --- [수정] 하단 채팅창 로직 ---
-# --- 채팅 상담창 출력 및 입력창 (최적화 버전) ---
-        st.markdown("---")
-        st.subheader("💬 AI 엔지니어 상담창")
-        
-        # 메시지 히스토리 출력
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-
-        # 채팅 입력
-       # [교체할 전체 코드 블록]
-# --- [최종 수정] 스트리밍 방식의 채팅 상담창 ---
-        st.markdown("---")
-        st.subheader("💬 AI 엔지니어 상담창")
-        
-        # 1. 메시지 출력
-        for message in st.session_state.messages:
-            with st.chat_message(message["role"]):
-                st.markdown(message["content"])
-
-        # 2. 채팅 입력
-        if prompt := st.chat_input("추가 질문을 입력하세요..."):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
+    # 채팅 입력
+    if prompt := st.chat_input("추가 질문을 입력하세요..."):
+        # 1. 사용자 메시지 저장 및 즉시 표시
+        st.session_state.messages.append({"role": "user", "content": prompt})
+        with st.chat_message("user"):
+            st.markdown(prompt)
+            
+        # 2. AI 답변 생성 (스트리밍 방식)
+        with st.chat_message("assistant"):
+            try:
+                model = genai.GenerativeModel('gemini-1.5-flash')
                 
-            with st.chat_message("assistant"):
-                try:
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    
-                    # 데이터 최적화: 대화 전체가 아닌 최근 3개 메시지의 '내용'만 추출
-                    history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-4:-1]])
-                    system_status = f"리스크 상태: {st.session_state.get('last_defect_risks', '진단 전')}"
-                    
-                    # 프롬프트 구성
-                    full_prompt = f"당신은 사출 성형 전문가입니다.\n\n[상태]: {system_status}\n[이전 대화]: {history_text}\n[질문]: {prompt}"
-                    
-                    # 스트리밍 호출
-                    stream = model.generate_content(full_prompt, stream=True)
-                    
-                    # 답변 실시간 출력
-                    response_text = st.write_stream(chunk.text for chunk in stream)
-                    
-                    # 결과 저장
-                    st.session_state.messages.append({"role": "assistant", "content": response_text})
-                    
-                except Exception as e:
-                    st.error(f"AI 응답 오류: {e}")
+                # 데이터 정제 (API 오류 방지: 대화 기록을 텍스트로 깔끔하게 변환)
+                history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-4:-1]])
+                system_status = f"리스크 상태: {st.session_state.get('last_defect_risks', '진단 전')}"
+                
+                # 안전한 프롬프트 구성
+                full_prompt = f"당신은 사출 성형 전문가입니다.\n[현재 상황]: {system_status}\n[이전 대화]: {history_text}\n[사용자 질문]: {prompt}"
+                
+                # 스트리밍 API 호출
+                stream = model.generate_content(full_prompt, stream=True)
+                
+                # 실시간 출력 (화면 대기 현상 해결)
+                response_text = st.write_stream(chunk.text for chunk in stream)
+                
+                # 답변 저장
+                st.session_state.messages.append({"role": "assistant", "content": response_text})
+                
+            except Exception as e:
+                st.error(f"AI 응답 생성 실패: {e}")
+                # 오류 시 강제 초기화 버튼
+                if st.button("대화 초기화 (오류 발생 시)"):
+                    st.session_state.messages = []
+                    st.rerun()
