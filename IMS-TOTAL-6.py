@@ -358,6 +358,22 @@ def generate_joint_style_ai_guidance(input_values, mode="Diagnosis"):
             return "⏳ API 사용량이 많습니다. 잠시 후 다시 시도해 주세요."
         return f"❌ AI 생성 오류: {error_msg}"
 
+def get_or_generate_joint_guidance(input_values, mode):
+    """[추가] API 절약: 'B. 사출 기술 AI'와 'LLM 가이드라인 생성' 두 버튼이
+    동일한 캐시를 공유하도록 하여, 같은 조건에 대해 중복으로 API를 호출하지 않게 함."""
+    inputs_signature = (tuple(round(float(v), 3) for v in input_values), mode)
+    if (
+        st.session_state.get('joint_ai_guidance_text')
+        and st.session_state.get('joint_ai_guidance_signature') == inputs_signature
+    ):
+        return st.session_state['joint_ai_guidance_text'], False  # (텍스트, 새로 호출했는지 여부)
+
+    text = generate_joint_style_ai_guidance(input_values, mode=mode)
+    st.session_state['joint_ai_guidance_text'] = text
+    st.session_state['joint_ai_guidance_mode'] = mode
+    st.session_state['joint_ai_guidance_signature'] = inputs_signature
+    return text, True
+
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&family=Noto+Sans+KR:wght@300;400;700&display=swap');
@@ -615,8 +631,12 @@ if is_active:
         st.markdown(f'<div class="section-title"><span class="square-icon"></span>{L["sec_b"]}</div>', unsafe_allow_html=True)
         if st.button(L['btn_ai_guide']):
             if st.session_state['last_analyzed_inputs'] is not None:
-                run_genai_advice(st.session_state['last_analyzed_inputs'])
-                st.rerun() 
+                guide_mode = "Optimization" if st.session_state.get('last_opt_df') is not None else "Diagnosis"
+                text, was_new_call = get_or_generate_joint_guidance(st.session_state['last_analyzed_inputs'], guide_mode)
+                st.session_state['expert_advice_text'] = text
+                if not was_new_call:
+                    st.toast("ℹ️ 동일한 조건의 분석 결과가 이미 있어 API를 재호출하지 않았습니다.")
+                st.rerun()
             else:
                 st.warning(L['warn_diag_first'])
         
@@ -624,12 +644,11 @@ if is_active:
             with st.expander(L['exp_ai_advice'], expanded=True):
                 st.markdown(f'<div class="scrollable-box">{st.session_state["expert_advice_text"].replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
 
-        # [추가] JOINT-AI-APP-5 스타일 상세 AI 가이드 생성 (기존 기능과 독립적으로 추가됨)
+        # [추가] JOINT-AI-APP-5 스타일 상세 AI 가이드 생성 (B.사출 기술 AI와 캐시를 공유함)
         if st.button(L['btn_joint_ai_guide'], key="btn_joint_ai_guide_detailed"):
             if st.session_state['last_analyzed_inputs'] is not None:
                 guide_mode = "Optimization" if st.session_state.get('last_opt_df') is not None else "Diagnosis"
 
-                # [추가] API 절약: 직전과 동일한 조건/모드라면 재호출하지 않고 캐시된 리포트 재사용
                 inputs_signature = (tuple(round(float(v), 3) for v in st.session_state['last_analyzed_inputs']), guide_mode)
                 if (
                     st.session_state.get('joint_ai_guidance_text')
@@ -643,11 +662,7 @@ if is_active:
                     ai_progress_bar.progress(45, text=" 사용 가능한 AI 모델 탐색 중...")
                     ai_progress_bar.progress(65, text=L['joint_ai_loading'])
 
-                    st.session_state['joint_ai_guidance_text'] = generate_joint_style_ai_guidance(
-                        st.session_state['last_analyzed_inputs'], mode=guide_mode
-                    )
-                    st.session_state['joint_ai_guidance_mode'] = guide_mode
-                    st.session_state['joint_ai_guidance_signature'] = inputs_signature
+                    get_or_generate_joint_guidance(st.session_state['last_analyzed_inputs'], guide_mode)
 
                     ai_progress_bar.progress(90, text=" 현장 적용용 리포트 정리 중...")
                     ai_progress_bar.progress(100, text="✅ AI 공정 가이드라인 생성 완료")
