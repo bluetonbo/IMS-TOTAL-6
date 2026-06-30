@@ -677,43 +677,43 @@ if is_active:
                 st.download_button(label=L['btn_download'], data=csv, file_name='total_optimized_params.csv', mime='text/csv')
             # --- [추가] 채팅 상담창 출력 및 입력창 ---
        # --- [채팅 상담창: 최적화된 스트리밍 버전] ---
-with st.container():
-    # 파일 맨 하단에 딱 한 번만 배치
+
+    # 파일 맨 하단에 딱 한 번만 배치하세요 (들여쓰기 주의!)
 st.markdown("---")
 st.subheader("💬 AI 엔지니어 상담창")
 
-# 1. 메시지 히스토리 출력
+# 1. 메시지 히스토리 출력 (컨테이너 없이 직접 출력)
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# 2. 채팅 입력 (컨테이너로 감싸 중복 생성 방지)
-with st.container():
-    if prompt := st.chat_input("추가 질문을 입력하세요..."):
-        # 메시지 기록
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+# 2. 채팅 입력 (컨테이너로 감싸서 레이아웃 고정)
+    with st.container():
+        if prompt := st.chat_input("추가 질문을 입력하세요..."):
+            # 메시지 기록
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
             
-        with st.chat_message("assistant"):
-            try:
-                # 텍스트 데이터만 추출 (딕셔너리 구조 제거하여 오류 방지)
-                history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-4:-1]])
-                system_status = f"현재 리스크: {st.session_state.get('last_defect_risks', '진단 전')}"
+            with st.chat_message("assistant"):
+                try:
+                    # 텍스트 데이터만 추출
+                    history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-4:-1]])
+                    system_status = f"현재 리스크: {st.session_state.get('last_defect_risks', '진단 전')}"
                 
-                # 프롬프트 생성
-                full_prompt = f"당신은 전문가입니다. [상태]: {system_status}\n[대화]: {history_text}\n[질문]: {prompt}"
+                    # 프롬프트 생성
+                    full_prompt = f"당신은 사출 성형 전문가입니다. [상태]: {system_status}\n[대화]: {history_text}\n[질문]: {prompt}"
                 
-                # 스트리밍 API 호출
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                response_stream = model.generate_content(full_prompt, stream=True)
+                    # 스트리밍 API 호출
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    response_stream = model.generate_content(full_prompt, stream=True)
                 
-                # 실시간 답변 출력
-                full_response = st.write_stream(chunk.text for chunk in response_stream)
+                    # 실시간 답변 출력
+                    full_response = st.write_stream(chunk.text for chunk in response_stream)
                 
-                # 답변 저장 후 즉시 페이지 새로고침하여 루프 탈출
-                st.session_state.messages.append({"role": "assistant", "content": full_response})
-                st.rerun() 
+                    # 답변 저장 후 리런(무한 루프 방지)
+                    st.session_state.messages.append({"role": "assistant", "content": full_response})
+                    st.rerun() 
                 
-            except Exception as e:
-                st.error(f"오류: {e}")
+                except Exception as e:
+                    st.error(f"오류: {e}")
