@@ -678,45 +678,42 @@ if is_active:
             # --- [추가] 채팅 상담창 출력 및 입력창 ---
        # --- [채팅 상담창: 최적화된 스트리밍 버전] ---
 with st.container():
-    st.markdown("---")
-    st.subheader("💬 AI 엔지니어 상담창")
-    
-    # 메시지 기록 출력 (중복 방지: 여기서 딱 한 번만 수행)
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+    # 파일 맨 하단에 딱 한 번만 배치
+st.markdown("---")
+st.subheader("💬 AI 엔지니어 상담창")
 
-    # 채팅 입력
+# 1. 메시지 히스토리 출력
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+
+# 2. 채팅 입력 (컨테이너로 감싸 중복 생성 방지)
+with st.container():
     if prompt := st.chat_input("추가 질문을 입력하세요..."):
-        # 1. 사용자 메시지 저장 및 즉시 표시
+        # 메시지 기록
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
             
-        # 2. AI 답변 생성 (스트리밍 방식)
         with st.chat_message("assistant"):
             try:
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                
-                # 데이터 정제 (API 오류 방지: 대화 기록을 텍스트로 깔끔하게 변환)
+                # 텍스트 데이터만 추출 (딕셔너리 구조 제거하여 오류 방지)
                 history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-4:-1]])
-                system_status = f"리스크 상태: {st.session_state.get('last_defect_risks', '진단 전')}"
+                system_status = f"현재 리스크: {st.session_state.get('last_defect_risks', '진단 전')}"
                 
-                # 안전한 프롬프트 구성
-                full_prompt = f"당신은 사출 성형 전문가입니다.\n[현재 상황]: {system_status}\n[이전 대화]: {history_text}\n[사용자 질문]: {prompt}"
+                # 프롬프트 생성
+                full_prompt = f"당신은 전문가입니다. [상태]: {system_status}\n[대화]: {history_text}\n[질문]: {prompt}"
                 
                 # 스트리밍 API 호출
-                stream = model.generate_content(full_prompt, stream=True)
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                response_stream = model.generate_content(full_prompt, stream=True)
                 
-                # 실시간 출력 (화면 대기 현상 해결)
-                response_text = st.write_stream(chunk.text for chunk in stream)
+                # 실시간 답변 출력
+                full_response = st.write_stream(chunk.text for chunk in response_stream)
                 
-                # 답변 저장
-                st.session_state.messages.append({"role": "assistant", "content": response_text})
+                # 답변 저장 후 즉시 페이지 새로고침하여 루프 탈출
+                st.session_state.messages.append({"role": "assistant", "content": full_response})
+                st.rerun() 
                 
             except Exception as e:
-                st.error(f"AI 응답 생성 실패: {e}")
-                # 오류 시 강제 초기화 버튼
-                if st.button("대화 초기화 (오류 발생 시)"):
-                    st.session_state.messages = []
-                    st.rerun()
+                st.error(f"오류: {e}")
