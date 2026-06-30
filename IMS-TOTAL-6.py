@@ -818,11 +818,29 @@ if is_active:
                 st.markdown(prompt)
                 
             with st.chat_message("assistant"):
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                full_prompt = f"당신은 사출 전문가입니다. 상태: {system_status}. 이전 대화: {st.session_state.messages}. 질문: {prompt}"
-                response = model.generate_content(full_prompt)
-                st.markdown(response.text)
-                st.session_state.messages.append({"role": "assistant", "content": response.text})
+                try:
+                    genai.configure(api_key=os.environ.get("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY", None))
+                    available_models = [
+                        m.name for m in genai.list_models()
+                        if 'generateContent' in m.supported_generation_methods
+                    ]
+                    priority = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash']
+                    target_model = next((m for m in priority if m in available_models), available_models[0] if available_models else None)
+                    if target_model is None:
+                        raise RuntimeError("사용 가능한 AI 모델을 찾을 수 없습니다.")
+                    model = genai.GenerativeModel(target_model)
+                    full_prompt = f"당신은 사출 전문가입니다. 상태: {system_status}. 이전 대화: {st.session_state.messages}. 질문: {prompt}"
+                    response = model.generate_content(full_prompt)
+                    st.markdown(response.text)
+                    st.session_state.messages.append({"role": "assistant", "content": response.text})
+                except Exception as e:
+                    err_msg = str(e)
+                    if "429" in err_msg:
+                        err_display = "⏳ API 사용량이 많습니다. 잠시 후 다시 시도해 주세요."
+                    else:
+                        err_display = f"❌ AI 생성 오류: {err_msg}"
+                    st.error(err_display)
+                    st.session_state.messages.append({"role": "assistant", "content": err_display})
     with t2:
         if not st.session_state['df_injection'].empty:
             st.dataframe(st.session_state['df_injection'], use_container_width=True)
