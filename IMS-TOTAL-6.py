@@ -693,29 +693,31 @@ if is_active:
                 st.markdown(message["content"])
 
         # 채팅 입력
-        if prompt := st.chat_input("추가 질문을 입력하세요..."):
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
-                
-            with st.chat_message("assistant"):
-                # 응답 생성 및 표시
-                try:
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    
-                    # 현재 상태와 최근 대화 3개만 요약해서 전송 (속도 핵심)
-                    recent_history = st.session_state.messages[-4:-1] 
-                    system_status = f"리스크 정보: {st.session_state.get('last_defect_risks', '정보 없음')}"
-                    
-                    full_prompt = f"당신은 사출 성형 전문가입니다. 현재 상태: {system_status}. 이전 문맥: {recent_history}. 질문: {prompt}"
-                    
-                    # 스트리밍 호출 (답변이 오는 즉시 출력)
-                    stream = model.generate_content(full_prompt, stream=True)
-                    
-                    # 결과를 한 글자씩 실시간 출력
-                    response_text = st.write_stream(chunk.text for chunk in stream)
-                    
-                    st.session_state.messages.append({"role": "assistant", "content": response_text})
-                
-                except Exception as e:
-                    st.error(f"응답 생성 중 오류 발생: {e}")
+       # [교체할 전체 코드 블록]
+if prompt := st.chat_input("추가 질문을 입력하세요..."):
+    # 1. 메시지 저장 및 출력
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
+        
+    with st.chat_message("assistant"):
+        # 2. 스트리밍 방식으로 응답 받기
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            
+            # 리스크 데이터와 질문을 조합 (과부하 방지를 위해 최근 대화만 요약)
+            system_status = f"리스크 상태: {st.session_state.get('last_defect_risks', '진단 전')}"
+            recent_history = st.session_state.messages[-4:-1]
+            full_prompt = f"당신은 사출 성형 전문가입니다. 현재 상황: {system_status}. 이전 문맥: {recent_history}. 질문: {prompt}"
+            
+            # 스트리밍 활성화
+            stream = model.generate_content(full_prompt, stream=True)
+            
+            # 글자가 생성되는 즉시 화면에 출력 (대기 시간 제거)
+            response_text = st.write_stream(chunk.text for chunk in stream)
+            
+            # 최종 답변 저장
+            st.session_state.messages.append({"role": "assistant", "content": response_text})
+            
+        except Exception as e:
+            st.error(f"AI 응답 생성 중 오류가 발생했습니다: {e}")
