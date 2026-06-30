@@ -9,7 +9,13 @@ import sqlite3
 import json
 import os
 import time
-
+# --- [수정] 대화 답변 생성 전용 함수 ---
+@st.cache_data(show_spinner=False) # 캐싱을 통해 재실행 방지
+def get_ai_response(prompt, context):
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    full_prompt = f"당신은 사출 성형 전문가입니다. 현재 상황: {context}. 질문: {prompt}"
+    response = model.generate_content(full_prompt)
+    return response.text
 def safe_generate_content(model, prompt):
     max_retries = 3
     for attempt in range(max_retries):
@@ -676,27 +682,31 @@ if is_active:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
-        if prompt := st.chat_input("추가 질문을 입력하세요..."):
-            # 현재 상태 문맥 생성
-            system_status = f"현재 리스크 상태: {st.session_state.get('last_defect_risks', '진단 전')}"
+        # --- [수정] 하단 채팅창 로직 ---
+if prompt := st.chat_input("추가 질문을 입력하세요..."):
+    # 1. 상태 저장
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    
+    # 2. UI 즉시 업데이트 (사용자 질문 보여주기)
+    with st.chat_message("user"):
+        st.markdown(prompt)
+        
+    # 3. AI 답변 생성 (Spinner 추가로 대기 중임을 명시)
+    with st.spinner("AI 엔지니어가 답변을 작성 중입니다..."):
+        try:
+            system_status = f"리스크: {st.session_state.get('last_defect_risks', '없음')}"
             
-            st.session_state.messages.append({"role": "user", "content": prompt})
-            with st.chat_message("user"):
-                st.markdown(prompt)
-                
+            # 여기서 위에서 만든 함수를 호출
+            ai_answer = get_ai_response(prompt, system_status)
+            
+            # 4. 결과 저장 및 화면 표시
+            st.session_state.messages.append({"role": "assistant", "content": ai_answer})
             with st.chat_message("assistant"):
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                # [대체 시작]
-                # 최근 5개의 대화 기록만 요약하여 프롬프트 길이를 최적화합니다.
-                recent_history = st.session_state.messages[-5:] 
-                full_prompt = f"당신은 사출 전문가입니다. 최근 대화 내역: {recent_history}. 현재 질문: {prompt}"
-
-                # 안전한 함수 호출 사용
-                response = safe_generate_content(model, full_prompt)
-                # [대체 끝]
+                st.markdown(ai_answer)
                 
-                st.markdown(response.text)
-                st.session_state.messages.append({"role": "assistant", "content": response.text})
-    with t2:
-        if not st.session_state['df_injection'].empty:
-            st.dataframe(st.session_state['df_injection'], use_container_width=True)
+        except Exception as e:
+            st.error(f"답변 생성 중 오류 발생: {e}")
+            # 캐시가 꼬였을 경우를 대비해 초기화 버튼 제공
+            if st.button("오류 해결을 위해 캐시 초기화"):
+                st.cache_data.clear()
+                st.rerun()
