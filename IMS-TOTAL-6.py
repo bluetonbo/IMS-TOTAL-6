@@ -233,11 +233,34 @@ if 'models' not in st.session_state:
         'joint_ai_guidance_mode': None
     })
 
+# [추가] API 호출 절약을 위한 모델 목록 캐싱 헬퍼
+# genai.list_models()는 그 자체로 1회의 API 호출(쿼터 소모)에 해당하므로,
+# 상담창 메시지마다 / 버튼 클릭마다 매번 새로 조회하지 않고 세션 내에서 일정 시간(기본 10분) 재사용한다.
+MODEL_CACHE_TTL_SECONDS = 600
+
+def get_cached_target_model(priority_list=('gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash')):
+    now_ts = datetime.now().timestamp()
+    cached_names = st.session_state.get('_cached_model_names')
+    cached_ts = st.session_state.get('_cached_model_names_ts', 0)
+
+    if cached_names is None or (now_ts - cached_ts) > MODEL_CACHE_TTL_SECONDS:
+        cached_names = [
+            m.name for m in genai.list_models()
+            if 'generateContent' in m.supported_generation_methods
+        ]
+        st.session_state['_cached_model_names'] = cached_names
+        st.session_state['_cached_model_names_ts'] = now_ts
+
+    if not cached_names:
+        raise RuntimeError("사용 가능한 AI 모델을 찾을 수 없습니다.")
+
+    target_model = next((m for m in priority_list if m in cached_names), cached_names[0])
+    return target_model
+
 def run_genai_advice(input_values):
     try:
         genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
-        models = [m for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        target_model = next((m.name for m in models if 'gemini-1.5' in m.name), models[0].name)
+        target_model = get_cached_target_model()
         model = genai.GenerativeModel(target_model)
         
         all_v = st.session_state['global_process_vars']
@@ -321,16 +344,7 @@ def generate_joint_style_ai_guidance(input_values, mode="Diagnosis"):
 반드시 위에 제공된 수치 데이터만을 근거로 작성하고, 데이터에 없는 내용은 추측하지 마세요."""
 
     try:
-        available_models = [
-            m.name for m in genai.list_models()
-            if 'generateContent' in m.supported_generation_methods
-        ]
-        if not available_models:
-            return "❌ 사용 가능한 AI 모델을 찾을 수 없습니다."
-
-        priority = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash']
-        target_model = next((m for m in priority if m in available_models), available_models[0])
-
+        target_model = get_cached_target_model()
         model = genai.GenerativeModel(target_model, system_instruction=system_instruction)
         response = model.generate_content(prompt)
         return response.text
@@ -829,14 +843,7 @@ if is_active:
             with st.chat_message("assistant"):
                 try:
                     genai.configure(api_key=os.environ.get("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY", None))
-                    available_models = [
-                        m.name for m in genai.list_models()
-                        if 'generateContent' in m.supported_generation_methods
-                    ]
-                    priority = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash']
-                    target_model = next((m for m in priority if m in available_models), available_models[0] if available_models else None)
-                    if target_model is None:
-                        raise RuntimeError("사용 가능한 AI 모델을 찾을 수 없습니다.")
+                    target_model = get_cached_target_model()
                     model = genai.GenerativeModel(target_model)
                     full_prompt = f"당신은 사출 전문가입니다. 상태: {system_status}. 이전 대화: {st.session_state.messages}. 질문: {prompt}"
                     response = model.generate_content(full_prompt)
