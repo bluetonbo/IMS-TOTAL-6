@@ -561,6 +561,19 @@ if is_active:
                 input_vals = [float(st.session_state['current_inputs'].get(v, 0.0)) for v in all_v]
                 st.session_state['last_res_val'] = calculate_total_risk(input_vals)
                 st.session_state['last_defect_risks'] = get_individual_risks(input_vals)
+                # --- [추가] 진단 버튼 클릭 시 즉시 AI 가이드라인 생성 ---
+                try:
+                    risk_summary = str(st.session_state['last_defect_risks'])
+                    system_prompt = "당신은 사출 성형 전문가입니다. 현재 리스크 결과를 분석하여 현장 엔지니어에게 개선 가이드를 3가지 포인트로 요약해서 대화하듯 설명하세요."
+                    
+                    model = genai.GenerativeModel('gemini-1.5-flash')
+                    # 기존에 정의된 safe_generate_content를 재사용하여 오류 방지
+                    response = safe_generate_content(model, f"{system_prompt}\n\n데이터: {risk_summary}")
+                    
+                    # 결과를 채팅 메시지 기록에 저장
+                    st.session_state.messages.append({"role": "assistant", "content": response.text})
+                except Exception as e:
+                    st.warning(f"AI 가이드라인 생성 실패: {e}")
                 st.session_state['last_analyzed_inputs'] = input_vals 
                 st.session_state['last_opt_df'] = None
                 st.session_state['optimization_success'] = "N/A"
