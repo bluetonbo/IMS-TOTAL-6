@@ -8,23 +8,6 @@ import google.generativeai as genai
 import sqlite3
 import json
 import os
-import time
-# --- [수정] 대화 답변 생성 전용 함수 ---
-@st.cache_data(show_spinner=False) # 캐싱을 통해 재실행 방지
-def get_ai_response(prompt, context):
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    full_prompt = f"당신은 사출 성형 전문가입니다. 현재 상황: {context}. 질문: {prompt}"
-    response = model.generate_content(full_prompt)
-    return response.text
-def safe_generate_content(model, prompt):
-    max_retries = 3
-    for attempt in range(max_retries):
-        try:
-            return model.generate_content(prompt)
-        except Exception as e:
-            if attempt == max_retries - 1:
-                raise e
-            time.sleep(2)  # 오류 발생 시 2초 대기 후 재시도
 from datetime import datetime
 # --- 대화형 인터페이스를 위한 세션 상태 초기화 ---
 if "messages" not in st.session_state:
@@ -83,7 +66,12 @@ LANG_DICT = {
         "db_export_title": "💾 External Database Export",
         "db_prepare_btn": "⚙️ Generate & Save DB Snapshot",
         "db_prepared_msg": "Prepared File: ",
-        "db_current_latest": "✨ The file contains the latest data state."
+        "db_current_latest": "✨ The file contains the latest data state.",
+        # [추가] JOINT 스타일 AI 가이드 기능용 라벨
+        "btn_joint_ai_guide": "🤖 Generate LLM-based Process Guidelines (Detailed)",
+        "joint_ai_loading": "Analyzing process variables and defect risk data to generate factory guidance...",
+        "exp_joint_ai_advice": "View Detailed AI Process Guidance Report",
+        "joint_ai_download": "📥 Download Report"
     },
     "ko": {
         "page_title": "통합 사출 불량 AI 솔루션 시스템",
@@ -136,7 +124,12 @@ LANG_DICT = {
         "db_export_title": "💾 데이터베이스 외부 내보내기",
         "db_prepare_btn": "⚙️ DB 스냅샷 생성 및 서버 저장",
         "db_prepared_msg": "준비된 파일: ",
-        "db_current_latest": "✨ 최신 데이터 상태가 파일에 이미 반영되어 있습니다."
+        "db_current_latest": "✨ 최신 데이터 상태가 파일에 이미 반영되어 있습니다.",
+        # [추가] JOINT 스타일 AI 가이드 기능용 라벨
+        "btn_joint_ai_guide": "🤖 LLM 기반 공정 가이드라인 생성 (상세)",
+        "joint_ai_loading": "공정 변수와 불량 리스크 데이터를 분석하여 공장 가이드를 생성 중입니다...",
+        "exp_joint_ai_advice": "상세 AI 공정 가이드 리포트 보기",
+        "joint_ai_download": "📥 리포트 다운로드"
     }
 }
 
@@ -234,7 +227,10 @@ if 'models' not in st.session_state:
         'expert_advice_text': None,
         'last_analyzed_inputs': None,
         'prepared_db_file': None,
-        'data_changed_since_save': False
+        'data_changed_since_save': False,
+        # [추가] JOINT 스타일 AI 가이드 결과 저장용
+        'joint_ai_guidance_text': None,
+        'joint_ai_guidance_mode': None
     })
 
 def run_genai_advice(input_values):
@@ -252,6 +248,98 @@ def run_genai_advice(input_values):
         st.session_state['expert_advice_text'] = res.text
     except Exception as e:
         st.session_state['expert_advice_text'] = f"{L['ai_err']}{e}"
+
+# [추가] JOINT-AI-APP-5 스타일: 모델 자동탐지 + 429 오류 처리 + 컨텍스트 고정(grounding) 프롬프트 기반 AI 공정 가이드 생성 함수
+def generate_joint_style_ai_guidance(input_values, mode="Diagnosis"):
+    api_key = os.environ.get("GOOGLE_API_KEY") or st.secrets.get("GOOGLE_API_KEY", None)
+    if not api_key:
+        return "⚠️ API 키가 환경변수/Secrets에 설정되지 않았습니다."
+
+    genai.configure(api_key=api_key)
+
+    all_v = st.session_state['global_process_vars']
+    df_input = pd.DataFrame([input_values], columns=all_v)
+
+    # 공정 변수 값 정리
+    specs_str = "\n".join([f"  - {v}: {input_values[all_v.index(v)]:.2f}" for v in all_v])
+
+    # 불량 리스크(%) 정리 (가중치/활성화 상태 포함)
+    risk_lines = []
+    for target_key, model in st.session_state['models'].items():
+        scaler = st.session_state['scalers'][target_key]
+        prob = model.predict_proba(scaler.transform(df_input))[0, 1] * 100
+        is_active = st.session_state['defect_switches'].get(target_key, True)
+        weight = st.session_state['defect_weights'].get(target_key, 1.0)
+        risk_lines.append(
+            f"  - {TARGET_VARS.get(target_key, target_key)}: {prob:.1f}%  (가중치: {weight}, 활성화: {'예' if is_active else '아니오'})"
+        )
+    risks_str = "\n".join(risk_lines)
+
+    total_risk_val = st.session_state.get('last_res_val')
+    total_risk_str = f"{total_risk_val*100:.1f}%" if total_risk_val is not None else "N/A"
+
+    opt_status = st.session_state.get('optimization_success', 'N/A')
+    selected_algo = st.session_state.get('selected_algorithm', 'N/A')
+
+    mode_desc = {
+        "Diagnosis": "사용자가 현재 입력한 사출 조건을 그대로 진단한 '현재 리스크 진단' 결과",
+        "Optimization": f"불량 리스크를 최소화하기 위해 역최적화 알고리즘({selected_algo})으로 도출한 '최적 조건' 결과"
+    }.get(mode, "사출 공정 분석 결과")
+
+    system_instruction = (
+        "당신은 'Total Injection AI Solution System'에 내장된 사출 성형 공정 엔지니어링 전문 AI 어시스턴트입니다. "
+        "이 시스템은 사출 성형 생산 데이터를 학습하여 10대 핵심 불량(Short Shot, Flash, Sink Mark, Weld Line, "
+        "Flow Mark, Silver Streak, Jetting, Burn Mark, Void, Warpage)의 발생 확률을 예측하고, "
+        "이를 최소화하는 사출 공정 변수 조합을 최적화로 도출합니다.\n\n"
+        "다음 규칙을 반드시 지키세요:\n"
+        "1. 답변은 오직 아래 사용자 메시지로 주어지는 '공정 변수 값'과 '불량 리스크' 데이터에만 근거해야 합니다.\n"
+        "2. 이 데이터와 무관한 일반 지식, 다른 산업, 다른 공정, 다른 주제로 답변을 확장하지 마세요.\n"
+        "3. 변수명이나 수치가 불명확하더라도 임의로 새로운 정보를 지어내지 말고, 주어진 수치 범위 내에서만 해석하세요.\n"
+        "4. 답변은 한국어로, 사출 성형 엔지니어가 현장에서 바로 참고할 수 있는 실무형 보고서 형식으로 작성하세요."
+    )
+
+    prompt = f"""아래는 Total Injection AI Solution System에서 도출된 결과 데이터입니다. 이 데이터를 분석하여 공정 가이드라인을 작성해 주세요.
+
+[분석 모드]
+{mode} - {mode_desc}
+
+[현재 사출 공정 변수]
+{specs_str}
+
+[10대 불량 리스크 예측 결과]
+{risks_str}
+
+[종합 가중 리스크]
+{total_risk_str}
+
+[요청 사항 - 아래 형식에 맞춰 작성]
+1. 결과 요약: 현재 공정 조건과 불량 리스크가 의미하는 바를 핵심만 요약
+2. 고위험 불량 항목 평가: 어떤 불량 항목이 가장 위험한 수준인지, 어느 정도 위험한지 평가
+3. 주의가 필요한 공정 변수: 위 공정 변수 중 불량 리스크에 영향을 줄 수 있는 변수가 있다면 언급 (없으면 '특이사항 없음'으로 명시)
+4. 현장 적용 권장사항: 이 공정 조건을 실제 라인에 적용/개선할 때 점검해야 할 사항을 3가지 이내로 제시
+
+반드시 위에 제공된 수치 데이터만을 근거로 작성하고, 데이터에 없는 내용은 추측하지 마세요."""
+
+    try:
+        available_models = [
+            m.name for m in genai.list_models()
+            if 'generateContent' in m.supported_generation_methods
+        ]
+        if not available_models:
+            return "❌ 사용 가능한 AI 모델을 찾을 수 없습니다."
+
+        priority = ['gemini-1.5-flash', 'gemini-1.5-pro', 'gemini-2.0-flash']
+        target_model = next((m for m in priority if m in available_models), available_models[0])
+
+        model = genai.GenerativeModel(target_model, system_instruction=system_instruction)
+        response = model.generate_content(prompt)
+        return response.text
+
+    except Exception as e:
+        error_msg = str(e)
+        if "429" in error_msg:
+            return "⏳ API 사용량이 많습니다. 잠시 후 다시 시도해 주세요."
+        return f"❌ AI 생성 오류: {error_msg}"
 
 st.markdown("""
     <style>
@@ -339,7 +427,15 @@ with st.sidebar:
                 vars_list = [c for c in df_comb.columns if c not in TARGET_VARS.keys() and c != 'vars']
                 models_dict, scalers_dict = {}, {}
                 
-                for target in available_targets:
+                # [추가] 모델 학습 진행률 표시
+                train_progress_bar = st.sidebar.progress(0, text="모델 학습 준비 중...")
+                total_targets_n = len(available_targets)
+                
+                for t_idx, target in enumerate(available_targets):
+                    train_progress_bar.progress(
+                        t_idx / total_targets_n,
+                        text=f"⚙️ 불량 모델 학습 중 ({t_idx+1}/{total_targets_n}): {TARGET_VARS.get(target, target)}"
+                    )
                     df_target = df_comb.copy()
                     t_series = df_target[target]
                     if isinstance(t_series, pd.DataFrame):
@@ -352,6 +448,7 @@ with st.sidebar:
                         model = LogisticRegression(max_iter=1000).fit(scaler.transform(df_target[vars_list]), df_target[target])
                         models_dict[target], scalers_dict[target] = model, scaler
 
+                train_progress_bar.progress(1.0, text="✅ 모든 불량 모델 학습 완료")
                 bounds_dict = {
                     v: (int(np.floor(df_comb[v].min())), int(np.ceil(df_comb[v].max())) if int(np.floor(df_comb[v].min())) != int(np.ceil(df_comb[v].max())) else int(np.floor(df_comb[v].min())) + 1) for v in vars_list
                 }
@@ -504,6 +601,32 @@ if is_active:
             with st.expander(L['exp_ai_advice'], expanded=True):
                 st.markdown(f'<div class="scrollable-box">{st.session_state["expert_advice_text"].replace(chr(10), "<br>")}</div>', unsafe_allow_html=True)
 
+        # [추가] JOINT-AI-APP-5 스타일 상세 AI 가이드 생성 (기존 기능과 독립적으로 추가됨)
+        if st.button(L['btn_joint_ai_guide'], key="btn_joint_ai_guide_detailed"):
+            if st.session_state['last_analyzed_inputs'] is not None:
+                with st.spinner(L['joint_ai_loading']):
+                    guide_mode = "Optimization" if st.session_state.get('last_opt_df') is not None else "Diagnosis"
+                    st.session_state['joint_ai_guidance_text'] = generate_joint_style_ai_guidance(
+                        st.session_state['last_analyzed_inputs'], mode=guide_mode
+                    )
+                    st.session_state['joint_ai_guidance_mode'] = guide_mode
+            else:
+                st.warning(L['warn_diag_first'])
+
+        if st.session_state.get('joint_ai_guidance_text'):
+            with st.expander(L['exp_joint_ai_advice'], expanded=True):
+                st.markdown(
+                    f'<div class="scrollable-box">{st.session_state["joint_ai_guidance_text"].replace(chr(10), "<br>")}</div>',
+                    unsafe_allow_html=True
+                )
+                st.download_button(
+                    label=L['joint_ai_download'],
+                    data=st.session_state['joint_ai_guidance_text'],
+                    file_name="AI_Process_Guidance_Report.txt",
+                    mime="text/plain",
+                    key="dl_joint_ai_report"
+                )
+
         st.divider()
 
         st.markdown(f'<div class="section-title"><span class="square-icon"></span>{L["sec_c"]}</div>', unsafe_allow_html=True)
@@ -561,19 +684,6 @@ if is_active:
                 input_vals = [float(st.session_state['current_inputs'].get(v, 0.0)) for v in all_v]
                 st.session_state['last_res_val'] = calculate_total_risk(input_vals)
                 st.session_state['last_defect_risks'] = get_individual_risks(input_vals)
-                # --- [추가] 진단 버튼 클릭 시 즉시 AI 가이드라인 생성 ---
-                try:
-                    risk_summary = str(st.session_state['last_defect_risks'])
-                    system_prompt = "당신은 사출 성형 전문가입니다. 현재 리스크 결과를 분석하여 현장 엔지니어에게 개선 가이드를 3가지 포인트로 요약해서 대화하듯 설명하세요."
-                    
-                    model = genai.GenerativeModel('gemini-1.5-flash')
-                    # 기존에 정의된 safe_generate_content를 재사용하여 오류 방지
-                    response = safe_generate_content(model, f"{system_prompt}\n\n데이터: {risk_summary}")
-                    
-                    # 결과를 채팅 메시지 기록에 저장
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
-                except Exception as e:
-                    st.warning(f"AI 가이드라인 생성 실패: {e}")
                 st.session_state['last_analyzed_inputs'] = input_vals 
                 st.session_state['last_opt_df'] = None
                 st.session_state['optimization_success'] = "N/A"
@@ -596,15 +706,8 @@ if is_active:
                 
                 genai.configure(api_key=st.secrets["GOOGLE_API_KEY"])
                 model = genai.GenerativeModel('gemini-1.5-flash')
-                # [수정 전]
-                # response = model.generate_content(f"{system_prompt}\n\n데이터: {risk_summary}")
-
-                # [수정 후]
-                model = genai.GenerativeModel('gemini-1.5-flash')
-                # 전체 리스크 데이터 대신 위험도가 높은 상위 3개 항목만 요약해서 전달
-                summary_risks = {k: v for k, v in st.session_state['last_defect_risks'].items() if v > 0.3} 
-                response = safe_generate_content(model, f"{system_prompt}\n\n핵심 리스크 요약: {summary_risks}")
-                              
+                response = model.generate_content(f"{system_prompt}\n\n데이터: {risk_summary}")
+                
                 st.session_state.messages.append({"role": "assistant", "content": response.text})
                 # --- [여기까지 추가] ---
                 
@@ -621,7 +724,15 @@ if is_active:
                 best_res = None
                 chosen_algo = "None"
                 
-                for algo in algorithms:
+                # [추가] 최적화 탐색 진행률 표시
+                opt_progress_bar = st.progress(0, text="조건 최적화 탐색 준비 중...")
+                total_algos_n = len(algorithms)
+                
+                for a_idx, algo in enumerate(algorithms):
+                    opt_progress_bar.progress(
+                        a_idx / total_algos_n,
+                        text=f"🔍 알고리즘 탐색 중 ({a_idx+1}/{total_algos_n}): {algo}"
+                    )
                     try:
                         res_temp = minimize(calculate_total_risk, x0, method=algo, bounds=bnds, options={'maxiter': 500})
                         if res_temp.success and res_temp.fun < best_fun:
@@ -630,6 +741,7 @@ if is_active:
                             chosen_algo = algo
                     except: continue
                 
+                opt_progress_bar.progress(0.9, text="🔍 다중 시작점(Multi-Start) 보조 탐색 중...")
                 try:
                     random_x0 = [np.random.uniform(b[0], b[1]) for b in bnds]
                     res_global = minimize(calculate_total_risk, random_x0, method='L-BFGS-B', bounds=bnds)
@@ -638,6 +750,8 @@ if is_active:
                         best_res = res_global
                         chosen_algo = "Hybrid Multi-Start (L-BFGS-B)"
                 except: pass
+                
+                opt_progress_bar.progress(1.0, text=f"✅ 최적화 완료 (선택된 알고리즘: {chosen_algo})")
 
                 if best_res is not None:
                     final_x = [np.clip(val, bnds[i][0], bnds[i][1]) for i, val in enumerate(best_res.x)]
@@ -689,44 +803,26 @@ if is_active:
                 csv = st.session_state['last_opt_df'].to_csv(index=False).encode('utf-8-sig')
                 st.download_button(label=L['btn_download'], data=csv, file_name='total_optimized_params.csv', mime='text/csv')
             # --- [추가] 채팅 상담창 출력 및 입력창 ---
-       # --- [채팅 상담창: 최적화된 스트리밍 버전] ---
+        st.markdown("---")
+        st.subheader("💬 AI 엔지니어 상담창")
+        for message in st.session_state.messages:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
 
-    # 파일 맨 하단에 딱 한 번만 배치하세요 (들여쓰기 주의!)
-# --- [최종 수정] 채팅 상담창 전용 레이아웃 (파일 맨 끝에 배치) ---
-st.markdown("---") # 구분선
-st.subheader(" AI 엔지니어 상담창")
-
-# 1. 메시지 기록 출력
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-
-# 2. 채팅 입력창 (탭 외부 최하단에 배치하여 사라짐 방지)
-if prompt := st.chat_input("추가 질문을 입력하세요..."):
-    # 사용자 메시지 추가
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
-        
-    # AI 답변 생성 (컨테이너 내부가 아닌 독립적인 어시스턴트 메시지)
-    with st.chat_message("assistant"):
-        try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
+        if prompt := st.chat_input("추가 질문을 입력하세요..."):
+            # 현재 상태 문맥 생성
+            system_status = f"현재 리스크 상태: {st.session_state.get('last_defect_risks', '진단 전')}"
             
-            # 텍스트 데이터만 추출
-            history_text = "\n".join([f"{m['role']}: {m['content']}" for m in st.session_state.messages[-4:-1]])
-            system_status = f"현재 리스크: {st.session_state.get('last_defect_risks', '진단 전')}"
-            full_prompt = f"당신은 사출 성형 전문가입니다. [상태]: {system_status}\n[대화]: {history_text}\n[질문]: {prompt}"
-            
-            # 스트리밍 API 호출
-            response_stream = model.generate_content(full_prompt, stream=True)
-            
-            # 실시간 출력
-            full_response = st.write_stream(chunk.text for chunk in response_stream)
-            
-            # 답변 저장 후 새로고침 (입력창 복구)
-            st.session_state.messages.append({"role": "assistant", "content": full_response})
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"오류: {e}")
+            st.session_state.messages.append({"role": "user", "content": prompt})
+            with st.chat_message("user"):
+                st.markdown(prompt)
+                
+            with st.chat_message("assistant"):
+                model = genai.GenerativeModel('gemini-1.5-flash')
+                full_prompt = f"당신은 사출 전문가입니다. 상태: {system_status}. 이전 대화: {st.session_state.messages}. 질문: {prompt}"
+                response = model.generate_content(full_prompt)
+                st.markdown(response.text)
+                st.session_state.messages.append({"role": "assistant", "content": response.text})
+    with t2:
+        if not st.session_state['df_injection'].empty:
+            st.dataframe(st.session_state['df_injection'], use_container_width=True)
