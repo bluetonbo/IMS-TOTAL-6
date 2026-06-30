@@ -827,7 +827,7 @@ if is_active:
                 st.download_button(label=L['btn_download'], data=csv, file_name='total_optimized_params.csv', mime='text/csv')
             # --- [추가] 채팅 상담창 출력 및 입력창 ---
         st.markdown("---")
-        st.subheader("💬 AI 엔지니어 상담창")
+        st.subheader(" AI 엔지니어 상담창")
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
